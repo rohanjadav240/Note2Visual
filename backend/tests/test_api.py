@@ -1,6 +1,7 @@
 """Comprehensive integration test suite for Note2Visual API."""
 
 import io
+import uuid
 import unittest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -79,6 +80,55 @@ class TestNote2VisualAPI(unittest.TestCase):
         self.assertIn("total_lessons", data)
         self.assertIn("completed_lessons", data)
         self.assertIn("total_topics", data)
+
+    def test_05_auth_flow(self):
+        # 1. Register with unique test email
+        unique_id = uuid.uuid4().hex[:8]
+        test_email = f"student_{unique_id}@example.com"
+        reg_res = self.client.post("/api/auth/register", json={
+            "email": test_email,
+            "password": "strongPassword123",
+            "name": "Alex Student"
+        })
+        self.assertEqual(reg_res.status_code, 200)
+        token_data = reg_res.json()
+        token = token_data["access_token"]
+        self.assertIn("access_token", token_data)
+        self.assertEqual(token_data["user"]["email"], test_email)
+
+        # 2. Login
+        login_res = self.client.post("/api/auth/login", json={
+            "email": test_email,
+            "password": "strongPassword123"
+        })
+        self.assertEqual(login_res.status_code, 200)
+        self.assertIn("access_token", login_res.json())
+
+        # 3. Get profile
+        me_res = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(me_res.status_code, 200)
+        self.assertEqual(me_res.json()["name"], "Alex Student")
+
+    def test_06_text_input_and_duplicate(self):
+        # Create project
+        create_res = self.client.post("/api/projects", json={
+            "title": "Algorithms & Big-O",
+            "subject": "CS"
+        })
+        proj_id = create_res.json()["id"]
+
+        # Ingest text directly
+        text_res = self.client.post(f"/api/projects/{proj_id}/text-input", json={
+            "text": "Time Complexity and Asymptotic Analysis: O(1) constant, O(log n) logarithmic, O(n) linear, O(n log n) linearithmic.",
+            "title": "Complexity Analysis"
+        })
+        self.assertEqual(text_res.status_code, 200)
+
+        # Duplicate project
+        dup_res = self.client.post(f"/api/projects/{proj_id}/duplicate")
+        self.assertEqual(dup_res.status_code, 200)
+        dup_proj = dup_res.json()
+        self.assertIn("(Copy)", dup_proj["title"])
 
 if __name__ == "__main__":
     unittest.main()

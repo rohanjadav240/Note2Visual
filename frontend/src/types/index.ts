@@ -21,13 +21,30 @@ export type VisualPattern =
   | 'comparison'
   | 'concept_network'
   | 'infographic'
+  | 'sketchnotes'
+  | 'revision_sheet'
   | 'lesson_cards'
   | 'math_explanation'
   | 'system_architecture'
   | 'auto';
 
+export interface User {
+  id: string;
+  email: string;
+  name: string | null;
+  tier: 'free' | 'pro' | 'educator';
+  created_at: string;
+}
+
+export interface AuthToken {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
 export interface Project {
   id: string;
+  user_id?: string | null;
   title: string;
   subject: string | null;
   language: string;
@@ -41,14 +58,17 @@ export interface Project {
   updated_at: string;
   document_name: string | null;
   document_count: number;
+  has_audio_lesson?: boolean;
 }
 
 export interface DocumentInfo {
   id: string;
+  project_id: string;
   original_filename: string;
   file_type: string;
   file_size: number;
   page_count: number | null;
+  extracted_text?: string | null;
   created_at: string;
 }
 
@@ -56,91 +76,85 @@ export interface ProcessingStep {
   step: string;
   label: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  message: string | null;
+  message?: string;
 }
 
 export interface ProcessingStatus {
   project_id: string;
-  status: string;
+  status: ProjectStatus;
   progress: number;
   steps: ProcessingStep[];
-  error: string | null;
+  error?: string;
 }
 
 export interface Concept {
   id: string;
   title: string;
   short_explanation: string;
-  detailed_explanation: string;
-  examples: string[];
-  source_page: number | null;
-  importance: 'low' | 'medium' | 'high';
-  related_concepts: string[];
-}
-
-export interface ReviewQuestion {
-  id: string;
-  question: string;
-  options: string[];
-  correct_answer: number;
-  explanation: string;
-  topic_id?: string;
+  detailed_explanation?: string;
+  visual_type?: string;
+  importance?: 'low' | 'medium' | 'high';
+  source_page?: number | null;
+  examples?: string[];
+  keywords?: string[];
 }
 
 export interface Topic {
   id: string;
   title: string;
-  overview: string;
+  overview?: string;
+  recommended_pattern?: string;
   concepts: Concept[];
-  key_takeaways: string[];
-  review_questions: ReviewQuestion[];
+  key_takeaways?: string[];
+  review_questions?: Array<{
+    id: string;
+    question: string;
+    options: string[];
+    correct_answer: number;
+    explanation?: string;
+  }>;
+  source_pages?: number[];
 }
 
 export interface Chapter {
   id: string;
   title: string;
-  overview: string;
+  overview?: string;
   topics: Topic[];
-  source_pages: number[];
 }
 
 export interface DiagramNode {
   id: string;
   label: string;
-  type: string;
-  description: string;
-  position: { x: number; y: number } | null;
-  style: Record<string, unknown>;
+  type?: string;
+  description?: string;
+  position?: { x: number; y: number };
+  style?: Record<string, any>;
+  collapsed?: boolean;
 }
 
 export interface DiagramEdge {
   id: string;
   source: string;
   target: string;
-  label: string;
-  type: string;
+  label?: string;
+  type?: string;
 }
 
 export interface DiagramData {
   pattern: string;
   nodes: DiagramNode[];
-  edges: DiagramEdge[];
-  metadata: Record<string, unknown>;
+  edges?: DiagramEdge[];
+  metadata?: Record<string, any>;
 }
 
 export interface LessonData {
   title: string;
-  subject: string;
-  learning_objectives: string[];
-  chapters: Chapter[];
-  diagrams: Record<string, DiagramData>;
-  source_document: string;
-  total_pages: number;
-  generated_at: string | null;
-  explanation_level: string;
+  subject?: string | null;
+  summary?: string;
   recommended_pattern?: string;
-  _demo_mode?: boolean;
-  _demo_notice?: string;
+  chapters: Chapter[];
+  diagrams?: Record<string, DiagramData>;
 }
 
 export interface Lesson {
@@ -173,6 +187,7 @@ export interface ExportInfo {
   project_id: string;
   export_type: string;
   status: string;
+  download_url?: string | null;
   created_at: string;
 }
 
@@ -187,6 +202,23 @@ export interface QuizResult {
     is_correct: boolean;
     explanation: string;
   }>;
+}
+
+export interface AudioLessonSection {
+  speaker: string;
+  topic_title: string;
+  text: string;
+  timestamp_estimate: number;
+}
+
+export interface AudioLessonResponse {
+  project_id: string;
+  title: string;
+  mode: string;
+  script: string;
+  sections: AudioLessonSection[];
+  estimated_duration_seconds: number;
+  created_at: string;
 }
 
 export interface LearningProgressData {
@@ -214,6 +246,8 @@ export const PATTERN_LABELS: Record<VisualPattern, string> = {
   comparison: 'Comparison',
   concept_network: 'Concept Network',
   infographic: 'Infographic',
+  sketchnotes: 'Sketchnotes',
+  revision_sheet: 'Revision Sheet',
   lesson_cards: 'Lesson Cards',
   math_explanation: 'Math Explanation',
   system_architecture: 'System Architecture',
@@ -228,6 +262,8 @@ export const PATTERN_DESCRIPTIONS: Record<VisualPattern, string> = {
   comparison: 'Side-by-side comparison of theories, methods, or concepts',
   concept_network: 'Interconnected ideas with labeled relationships',
   infographic: 'Chapter summaries with facts, definitions, and highlights',
+  sketchnotes: 'Notebook-inspired visual doodles, arrows, and sticky annotations',
+  revision_sheet: 'High-yield exam cheat sheet with formulas and common traps',
   lesson_cards: 'Bite-sized learning units with one concept each',
   math_explanation: 'Equations, step-by-step derivations, and worked examples',
   system_architecture: 'Software systems, networks, and technical architectures',

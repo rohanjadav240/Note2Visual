@@ -15,6 +15,8 @@ import {
   CreditCard,
   Calculator,
   Cpu,
+  PenTool,
+  FileCheck2,
   Info,
   X
 } from 'lucide-react';
@@ -44,6 +46,8 @@ const PATTERN_ICONS: Record<VisualPattern, React.ReactNode> = {
   comparison: <Columns className="h-3.5 w-3.5" />,
   concept_network: <Share2 className="h-3.5 w-3.5" />,
   infographic: <FileText className="h-3.5 w-3.5" />,
+  sketchnotes: <PenTool className="h-3.5 w-3.5" />,
+  revision_sheet: <FileCheck2 className="h-3.5 w-3.5" />,
   lesson_cards: <CreditCard className="h-3.5 w-3.5" />,
   storyboard: <Layers className="h-3.5 w-3.5" />,
   math_explanation: <Calculator className="h-3.5 w-3.5" />,
@@ -57,6 +61,8 @@ const PRIMARY_PATTERNS: VisualPattern[] = [
   'timeline',
   'comparison',
   'infographic',
+  'sketchnotes',
+  'revision_sheet',
   'lesson_cards'
 ];
 
@@ -67,6 +73,8 @@ export const DiagramContainer: React.FC<DiagramContainerProps> = ({
   availablePatterns = [
     'mind_map',
     'flowchart',
+    'sketchnotes',
+    'revision_sheet',
     'concept_network',
     'timeline',
     'storyboard',

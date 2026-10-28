@@ -40,6 +40,8 @@ class VisualPattern(str, enum.Enum):
     COMPARISON = "comparison"
     CONCEPT_NETWORK = "concept_network"
     INFOGRAPHIC = "infographic"
+    SKETCHNOTES = "sketchnotes"
+    REVISION_SHEET = "revision_sheet"
     LESSON_CARDS = "lesson_cards"
     MATH_EXPLANATION = "math_explanation"
     SYSTEM_ARCHITECTURE = "system_architecture"
@@ -50,10 +52,24 @@ def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    name = Column(String(255), nullable=True)
+    hashed_password = Column(String(500), nullable=False)
+    tier = Column(String(50), default="free")  # free, pro, educator
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
+
+
 class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     title = Column(String(500), nullable=False, default="Untitled Project")
     subject = Column(String(200), nullable=True)
     language = Column(String(50), default="English")
@@ -63,10 +79,13 @@ class Project(Base):
     status = Column(String(50), default=ProjectStatus.CREATED.value)
     status_message = Column(Text, nullable=True)
     progress = Column(Float, default=0.0)
+    audio_lesson = Column(JSON, nullable=True)
+    mind_map_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
+    user = relationship("User", back_populates="projects")
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     lessons = relationship("Lesson", back_populates="project", cascade="all, delete-orphan")
     exports = relationship("Export", back_populates="project", cascade="all, delete-orphan")
@@ -110,7 +129,7 @@ class Export(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    export_type = Column(String(50), default="full")  # full, concise, diagrams
+    export_type = Column(String(50), default="full")  # full, concise, diagrams, flashcards
     file_path = Column(String(500), nullable=True)
     status = Column(String(50), default="pending")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

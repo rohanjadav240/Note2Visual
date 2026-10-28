@@ -38,6 +38,8 @@ class VisualGenerator:
             "comparison": self._gen_comparison,
             "concept_network": self._gen_concept_network,
             "infographic": self._gen_infographic,
+            "sketchnotes": self._gen_sketchnotes,
+            "revision_sheet": self._gen_revision_sheet,
             "lesson_cards": self._gen_lesson_cards,
             "math_explanation": self._gen_math_explanation,
             "system_architecture": self._gen_system_architecture,
@@ -352,6 +354,68 @@ class VisualGenerator:
                     "type": "data_flow"
                 })
         return {"pattern": "system_architecture", "nodes": nodes, "edges": edges, "metadata": {"topic_title": topic["title"]}}
+
+    def _gen_sketchnotes(self, topic: dict, concepts: list, chapter: dict) -> dict:
+        nodes = []
+        doodle_icons = ["lightbulb", "gear", "compass", "book", "feather", "target", "cpu", "spark"]
+        container_styles = ["sticky_note", "lined_card", "doodle_box", "highlight_strip"]
+
+        # Topic Title Banner
+        nodes.append({
+            "id": f"sketch_header_{topic['id']}",
+            "label": topic["title"],
+            "type": "sketch_header",
+            "description": topic.get("overview", "Visual sketchnote capture"),
+            "style": {"container": "drawn_banner", "doodle": "pencil"}
+        })
+
+        for i, concept in enumerate(concepts):
+            nodes.append({
+                "id": concept["id"],
+                "label": concept["title"],
+                "type": "sketchnote_node",
+                "description": concept["short_explanation"],
+                "style": {
+                    "container": container_styles[i % len(container_styles)],
+                    "doodle": doodle_icons[i % len(doodle_icons)],
+                    "note_tag": f"Note 0{i + 1}",
+                    "example": concept.get("examples", [""])[0] if concept.get("examples") else "",
+                    "importance": concept.get("importance", "medium"),
+                    "page_ref": concept.get("source_page")
+                }
+            })
+        return {"pattern": "sketchnotes", "nodes": nodes, "edges": [], "metadata": {"topic_title": topic["title"]}}
+
+    def _gen_revision_sheet(self, topic: dict, concepts: list, chapter: dict) -> dict:
+        nodes = []
+        # Header overview
+        nodes.append({
+            "id": f"rev_header_{topic['id']}",
+            "label": topic["title"],
+            "type": "revision_header",
+            "description": topic.get("overview", "High-Yield Exam Cheat Sheet"),
+            "style": {"badge": "Exam Revision Sheet"}
+        })
+
+        for i, concept in enumerate(concepts):
+            # Formulate exam trap or mnemonic
+            examples = concept.get("examples", [])
+            trap = f"Don't confuse with adjacent topics. Focus on: {concept['short_explanation'][:80]}..."
+            nodes.append({
+                "id": concept["id"],
+                "label": concept["title"],
+                "type": "revision_axiom",
+                "description": concept.get("detailed_explanation", concept["short_explanation"]),
+                "style": {
+                    "axiom_num": i + 1,
+                    "importance": concept.get("importance", "high" if i < 2 else "medium"),
+                    "mnemonic": f"Key phrase: {concept['title'].split()[0]}",
+                    "trap_warning": trap,
+                    "examples": examples,
+                    "page_ref": concept.get("source_page")
+                }
+            })
+        return {"pattern": "revision_sheet", "nodes": nodes, "edges": [], "metadata": {"topic_title": topic["title"]}}
 
 
 visual_generator = VisualGenerator()

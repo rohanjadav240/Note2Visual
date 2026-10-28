@@ -8,12 +8,41 @@ import type {
   ExportInfo,
   QuizResult,
   LearningProgressData,
+  User,
+  AuthToken,
+  AudioLessonResponse,
 } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
 });
+
+// Attach Authorization header if token exists in localStorage
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('n2v_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+/* ====== Auth ====== */
+
+export async function register(data: { email: string; password: string; name?: string }): Promise<AuthToken> {
+  const res = await api.post('/auth/register', data);
+  return res.data;
+}
+
+export async function login(data: { email: string; password: string }): Promise<AuthToken> {
+  const res = await api.post('/auth/login', data);
+  return res.data;
+}
+
+export async function getMe(): Promise<User> {
+  const res = await api.get('/auth/me');
+  return res.data;
+}
 
 /* ====== Projects ====== */
 
@@ -39,11 +68,21 @@ export async function getProject(id: string): Promise<Project> {
   return res.data;
 }
 
+export async function updateProject(id: string, data: Partial<Project>): Promise<Project> {
+  const res = await api.patch(`/projects/${id}`, data);
+  return res.data;
+}
+
+export async function duplicateProject(id: string): Promise<Project> {
+  const res = await api.post(`/projects/${id}/duplicate`);
+  return res.data;
+}
+
 export async function deleteProject(id: string): Promise<void> {
   await api.delete(`/projects/${id}`);
 }
 
-/* ====== Upload ====== */
+/* ====== Upload & Ingestion ====== */
 
 export async function uploadDocument(projectId: string, file: File): Promise<DocumentInfo> {
   const formData = new FormData();
@@ -51,6 +90,14 @@ export async function uploadDocument(projectId: string, file: File): Promise<Doc
   const res = await api.post(`/projects/${projectId}/upload`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
+  return res.data;
+}
+
+export async function ingestTextInput(
+  projectId: string,
+  data: { text: string; title?: string; source_type?: string }
+): Promise<DocumentInfo> {
+  const res = await api.post(`/projects/${projectId}/text-input`, data);
   return res.data;
 }
 
@@ -84,6 +131,30 @@ export async function updateVisualSettings(
   settings: Partial<VisualSettings>
 ): Promise<void> {
   await api.patch(`/projects/${projectId}/visual-settings`, settings);
+}
+
+/* ====== Mind Map Editor ====== */
+
+export async function updateMindMap(
+  projectId: string,
+  data: { topic_id: string; nodes: any[]; edges: any[] }
+): Promise<void> {
+  await api.put(`/projects/${projectId}/mind-map`, data);
+}
+
+/* ====== Audio Lesson ====== */
+
+export async function generateAudioLesson(
+  projectId: string,
+  mode: string = 'lecture'
+): Promise<AudioLessonResponse> {
+  const res = await api.post(`/projects/${projectId}/audio-lesson`, { mode });
+  return res.data;
+}
+
+export async function getAudioLesson(projectId: string): Promise<AudioLessonResponse> {
+  const res = await api.get(`/projects/${projectId}/audio-lesson`);
+  return res.data;
 }
 
 /* ====== Export ====== */
@@ -146,17 +217,26 @@ export async function getHealth(): Promise<{ status: string; ai_provider: string
 }
 
 export const apiService = {
+  register,
+  login,
+  getMe,
   createProject,
   listProjects,
   getProject,
+  updateProject,
+  duplicateProject,
   deleteProject,
   uploadDocument,
+  ingestTextInput,
   generateLesson: startGeneration,
   startGeneration,
   getProcessingStatus,
   getLesson,
   updateLesson,
   updateVisualSettings,
+  updateMindMap,
+  generateAudioLesson,
+  getAudioLesson,
   requestExport,
   exportPdf,
   getExport,

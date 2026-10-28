@@ -7,21 +7,26 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Header
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.db.database import get_db
 from app.core.config import settings
+from app.core.security import hash_password, verify_password, create_access_token, decode_access_token
 from app.models.models import (
-    Project, Document, Lesson, Export, QuizAttempt, LearningProgress,
+    User, Project, Document, Lesson, Export, QuizAttempt, LearningProgress,
     ProjectStatus
 )
 from app.schemas.schemas import (
+    UserRegister, UserLogin, UserResponse, AuthToken,
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse,
-    DocumentResponse, ProcessingStatus, ProcessingStep,
+    DocumentResponse, TextInputRequest, ProcessingStatus, ProcessingStep,
     LessonResponse, LessonUpdate, VisualSettings,
     ExportRequest, ExportResponse,
     QuizSubmission, QuizResult,
+    AudioLessonRequest, AudioLessonResponse,
+    MindMapUpdateRequest,
     ProgressUpdate, ProgressResponse
 )
 from app.services.documents.extractor import document_extractor
@@ -30,6 +35,52 @@ from app.services.visuals.generator import visual_generator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# ==================== AUTH ====================
+
+@router.post("/auth/register", response_model=AuthToken)
+async def register(req: UserRegister, db: Session = Depends(get_db)):
+    email_clean = req.email.lower().strip()
+    existing = db.query(User).filter(User.email == email_clean).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+    user = User(
+        id=str(uuid.uuid4()),
+        email=email_clean,
+        name=req.name or email_clean.split("@")[0],
+        hashed_password=hash_password(req.password),
+        tier="free"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token(user.id, user.email)
+    return AuthToken(access_token=token, token_type="bearer", user=UserResponse.model_validate(user))
+
+
+@router.post("/auth/login", response_model=AuthToken)
+async def login(req: UserLogin, db: Session = Depends(get_db)):
+    email_clean = req.email.lower().strip()
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    token = create_access_token(user.id, user.email)
+    return AuthToken(access_token=token, token_type="bearer", user=UserResponse.model_validate(user))
+
+
+@router.get("/auth/me", response_model=UserResponse)
+async def get_me(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    token = authorization.split(" ")[1]
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    user = db.query(User).filter(User.id == payload["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return UserResponse.model_validate(user)
 
 
 # ==================== PROJECTS ====================
@@ -67,6 +118,71 @@ async def get_project(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return _project_to_response(project)
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+async def update_project(project_id: str, update: ProjectUpdate, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if update.title is not None:
+        project.title = update.title
+    if update.subject is not None:
+        project.subject = update.subject
+    if update.language is not None:
+        project.language = update.language
+    if update.explanation_level is not None:
+        project.explanation_level = update.explanation_level.value
+    if update.detail_amount is not None:
+        project.detail_amount = update.detail_amount
+    if update.default_pattern is not None:
+        project.default_pattern = update.default_pattern.value
+    project.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(project)
+    return _project_to_response(project)
+
+
+@router.post("/projects/{project_id}/duplicate", response_model=ProjectResponse)
+async def duplicate_project(project_id: str, db: Session = Depends(get_db)):
+    src = db.query(Project).filter(Project.id == project_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source project not found")
+    
+    new_proj = Project(
+        id=str(uuid.uuid4()),
+        user_id=src.user_id,
+        title=f"{src.title} (Copy)",
+        subject=src.subject,
+        language=src.language,
+        explanation_level=src.explanation_level,
+        detail_amount=src.detail_amount,
+        default_pattern=src.default_pattern,
+        status=src.status,
+        progress=src.progress,
+        audio_lesson=src.audio_lesson,
+        mind_map_data=src.mind_map_data
+    )
+    db.add(new_proj)
+    db.commit()
+
+    # Copy lessons
+    src_lesson = db.query(Lesson).filter(Lesson.project_id == project_id).first()
+    if src_lesson:
+        new_lesson = Lesson(
+            id=str(uuid.uuid4()),
+            project_id=new_proj.id,
+            version=src_lesson.version,
+            title=new_proj.title,
+            subject=src_lesson.subject,
+            lesson_data=src_lesson.lesson_data,
+            visual_settings=src_lesson.visual_settings
+        )
+        db.add(new_lesson)
+        db.commit()
+
+    db.refresh(new_proj)
+    return _project_to_response(new_proj)
 
 
 @router.delete("/projects/{project_id}")
@@ -134,6 +250,46 @@ async def upload_document(
     if project.title == "Untitled Project":
         project.title = Path(file.filename).stem
     
+    project.status = ProjectStatus.UPLOADING.value
+    project.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(doc)
+
+    return DocumentResponse.model_validate(doc)
+
+
+@router.post("/projects/{project_id}/text-input", response_model=DocumentResponse)
+async def ingest_text_input(
+    project_id: str,
+    req: TextInputRequest,
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stored_filename = f"{uuid.uuid4()}.txt"
+    file_path = settings.upload_path / stored_filename
+    file_path.write_text(req.text, encoding="utf-8")
+
+    title_clean = req.title.strip() if req.title and req.title.strip() else "Pasted Study Material"
+
+    doc = Document(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        original_filename=f"{title_clean}.txt",
+        stored_filename=stored_filename,
+        file_type="txt",
+        file_size=len(req.text.encode("utf-8")),
+        page_count=1,
+        extracted_text=req.text,
+        extraction_metadata={"source_type": req.source_type, "char_count": len(req.text)}
+    )
+    db.add(doc)
+
+    if project.title == "Untitled Project":
+        project.title = title_clean
+
     project.status = ProjectStatus.UPLOADING.value
     project.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -639,6 +795,86 @@ async def submit_quiz(project_id: str, submission: QuizSubmission, db: Session =
     return QuizResult(score=score, total_questions=total, correct_answers=correct, results=results)
 
 
+# ==================== AUDIO LESSONS ====================
+
+@router.post("/projects/{project_id}/audio-lesson", response_model=AudioLessonResponse)
+async def generate_audio_lesson(
+    project_id: str,
+    req: AudioLessonRequest,
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    lesson = db.query(Lesson).filter(Lesson.project_id == project_id).first()
+    if not lesson or not lesson.lesson_data:
+        raise HTTPException(status_code=400, detail="Lesson must be generated before creating an audio lesson")
+
+    audio_data = await ai_service.generate_audio_script(lesson.lesson_data, mode=req.mode)
+    project.audio_lesson = audio_data
+    project.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return AudioLessonResponse(
+        project_id=project_id,
+        title=audio_data.get("title", project.title),
+        mode=audio_data.get("mode", req.mode),
+        script=audio_data.get("script", ""),
+        sections=audio_data.get("sections", []),
+        estimated_duration_seconds=audio_data.get("estimated_duration_seconds", 120),
+        created_at=datetime.now(timezone.utc)
+    )
+
+
+@router.get("/projects/{project_id}/audio-lesson", response_model=AudioLessonResponse)
+async def get_audio_lesson(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.audio_lesson:
+        raise HTTPException(status_code=404, detail="No audio lesson found for this study pack")
+    data = project.audio_lesson
+    return AudioLessonResponse(
+        project_id=project_id,
+        title=data.get("title", project.title),
+        mode=data.get("mode", "lecture"),
+        script=data.get("script", ""),
+        sections=data.get("sections", []),
+        estimated_duration_seconds=data.get("estimated_duration_seconds", 120),
+        created_at=project.updated_at or project.created_at
+    )
+
+
+# ==================== MIND MAP EDITOR ====================
+
+@router.put("/projects/{project_id}/mind-map")
+async def update_mind_map(
+    project_id: str,
+    req: MindMapUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    lesson = db.query(Lesson).filter(Lesson.project_id == project_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+    lesson_data = dict(lesson.lesson_data)
+    diagrams = dict(lesson_data.get("diagrams", {}))
+    diagrams[req.topic_id] = {
+        "pattern": "mind_map",
+        "nodes": req.nodes,
+        "edges": req.edges,
+        "metadata": {"topic_id": req.topic_id, "customized": True}
+    }
+    lesson_data["diagrams"] = diagrams
+    lesson.lesson_data = lesson_data
+    project.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"message": "Mind map updated successfully", "topic_id": req.topic_id}
+
+
 # ==================== PROGRESS ====================
 
 @router.post("/projects/{project_id}/progress")
@@ -714,6 +950,7 @@ def _project_to_response(project: Project) -> ProjectResponse:
 
     return ProjectResponse(
         id=project.id,
+        user_id=project.user_id,
         title=project.title,
         subject=project.subject,
         language=project.language,
@@ -727,4 +964,5 @@ def _project_to_response(project: Project) -> ProjectResponse:
         updated_at=project.updated_at,
         document_name=doc_name,
         document_count=doc_count,
+        has_audio_lesson=bool(project.audio_lesson),
     )

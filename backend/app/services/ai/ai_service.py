@@ -364,5 +364,82 @@ RULES:
         # Default to mind map for general content
         return "mind_map"
 
+    async def generate_audio_script(self, lesson_data: dict, mode: str = "lecture") -> dict:
+        """Generate a complete audio lesson script with timestamps and speaker notes."""
+        title = lesson_data.get("title", "Study Lesson")
+        summary = lesson_data.get("summary", "")
+        chapters = lesson_data.get("chapters", [])
+        
+        sections = []
+        full_script_lines = []
+
+        # Intro Section
+        intro_text = (
+            f"Welcome to this Note2Visual audio lesson on {title}. "
+            f"{summary} Today, we'll break down the core mechanisms, key definitions, and practical takeaways."
+        )
+        sections.append({
+            "speaker": "Host",
+            "topic_title": "Introduction & Overview",
+            "text": intro_text,
+            "timestamp_estimate": 0
+        })
+        full_script_lines.append(intro_text)
+
+        elapsed = 15
+
+        for ch in chapters:
+            for top in ch.get("topics", []):
+                t_title = top.get("title", "")
+                t_overview = top.get("overview", "")
+                concepts = top.get("concepts", [])
+
+                concept_explanations = []
+                for c in concepts[:3]:
+                    c_title = c.get("title", "")
+                    c_expl = c.get("short_explanation", "")
+                    ex = c.get("examples", [])
+                    ex_str = f" For instance: {ex[0]}." if ex else ""
+                    concept_explanations.append(f"{c_title}: {c_expl}{ex_str}")
+
+                body_text = (
+                    f"Let's explore {t_title}. {t_overview} "
+                    f"{' '.join(concept_explanations)}"
+                )
+
+                sections.append({
+                    "speaker": "Narrator" if mode == "lecture" else "Instructor",
+                    "topic_title": t_title,
+                    "text": body_text,
+                    "timestamp_estimate": elapsed
+                })
+                full_script_lines.append(body_text)
+                # estimate ~130 words per minute -> ~2 words per second
+                word_count = len(body_text.split())
+                elapsed += max(int(word_count / 2.2), 15)
+
+        # Conclusion
+        conclusion_text = (
+            f"To recap, we have analyzed the foundational pillars of {title}. "
+            "Review your interactive visual models and test your retention with the active recall flashcards and quiz. "
+            "Thank you for listening, and happy studying!"
+        )
+        sections.append({
+            "speaker": "Host",
+            "topic_title": "Summary & Exam Takeaways",
+            "text": conclusion_text,
+            "timestamp_estimate": elapsed
+        })
+        full_script_lines.append(conclusion_text)
+        elapsed += 20
+
+        return {
+            "title": title,
+            "mode": mode,
+            "script": "\n\n".join(full_script_lines),
+            "sections": sections,
+            "estimated_duration_seconds": elapsed
+        }
+
 
 ai_service = AIService()

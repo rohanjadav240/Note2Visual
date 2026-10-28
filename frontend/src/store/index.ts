@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { VisualSettings, VisualPattern } from '../types';
+import type { VisualSettings, VisualPattern, User } from '../types';
 
 interface AppState {
   theme: 'light' | 'dark';
@@ -18,6 +18,31 @@ export const useAppStore = create<AppState>((set) => ({
       return { theme: next };
     }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+}));
+
+interface AuthState {
+  user: User | null;
+  token: string | null;
+  setAuth: (user: User, token: string) => void;
+  logout: () => void;
+}
+
+const savedToken = localStorage.getItem('n2v_token');
+const savedUser = localStorage.getItem('n2v_user');
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: savedUser ? JSON.parse(savedUser) : null,
+  token: savedToken || null,
+  setAuth: (user, token) => {
+    localStorage.setItem('n2v_token', token);
+    localStorage.setItem('n2v_user', JSON.stringify(user));
+    set({ user, token });
+  },
+  logout: () => {
+    localStorage.removeItem('n2v_token');
+    localStorage.removeItem('n2v_user');
+    set({ user: null, token: null });
+  },
 }));
 
 interface VisualSettingsState {
